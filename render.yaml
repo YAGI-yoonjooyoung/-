@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: location-photo-downloader
+    runtime: docker
+    plan: free
+    healthCheckPath: /

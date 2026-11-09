@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로케이션 사진 다운로더</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #1d1d1b; --muted: #7a776f;
+    --line: #e3e0d8; --accent: #d9481c; --accent-ink: #fff; --sel: #d9481c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151513; --panel: #1f1e1b; --ink: #f1efe9; --muted: #9b978d;
+            --line: #33312c; --accent: #ff6a3d; --accent-ink: #1a0d07; --sel: #ff6a3d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", sans-serif; }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 32px 16px 120px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 14px; }
+  form { display: flex; gap: 8px; }
+  input[type=text], input[type=url] {
+    flex: 1; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--panel); color: var(--ink); font-size: 15px; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { padding: 11px 18px; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--panel); color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .status { margin: 16px 0; color: var(--muted); font-size: 14px; min-height: 21px; }
+  .status.err { color: #c62828; }
+  .toolbar { display: none; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+             padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; }
+  .toolbar.on { display: flex; }
+  .toolbar label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .toolbar .name { flex: 1 1 220px; display: flex; gap: 6px; align-items: center; }
+  .toolbar .name input { padding: 8px 10px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+  .card { position: relative; border-radius: 10px; overflow: hidden; background: var(--panel);
+          border: 2px solid transparent; cursor: pointer; aspect-ratio: 4/3; }
+  .card img { width: 100%; height: 100%; object-fit: cover; display: block; background: var(--line); }
+  .card.sel { border-color: var(--sel); }
+  .card .chk { position: absolute; top: 8px; left: 8px; width: 24px; height: 24px; border-radius: 50%;
+               background: rgba(0,0,0,.35); border: 2px solid #fff; display: grid; place-items: center; color: #fff; font-size: 14px; }
+  .card.sel .chk { background: var(--sel); border-color: var(--sel); }
+  .card .meta { position: absolute; bottom: 0; left: 0; right: 0; padding: 18px 8px 6px; font-size: 11px; color: #fff;
+                background: linear-gradient(transparent, rgba(0,0,0,.6)); display: flex; justify-content: space-between; gap: 6px; }
+  .card .meta a { color: #fff; text-decoration: none; opacity: .85; }
+  .card.hidden, .card.broken { display: none; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px; background: var(--panel);
+         border-top: 1px solid var(--line); display: none; justify-content: center; }
+  .bar.on { display: flex; }
+  .bar .in { max-width: 1200px; width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  @media (max-width: 560px) {
+    form { flex-direction: column; }
+    .grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>로케이션 사진 다운로더</h1>
+  <p class="sub">장소 페이지 링크를 넣으면 페이지 안의 사진을 모아 보여주고, 골라서 ZIP으로 한 번에 받을 수 있어요.</p>
+
+  <form id="f">
+    <input id="url" type="text" placeholder="https://blog.naver.com/... 또는 장소/숙소/스튜디오 페이지 링크" autocomplete="off" required>
+    <button class="primary" id="go">사진 불러오기</button>
+  </form>
+  <div class="note">아워플레이스, 스페이스클라우드, 네이버 지도·플레이스, 네이버 블로그·카페, 티스토리, 스튜디오·숙소 사이트 등 대부분의 장소 페이지를 지원해요. 로그인해야 보이는 페이지는 불러올 수 없어요.</div>
+
+  <div class="status" id="status"></div>
+
+  <div class="toolbar" id="toolbar">
+    <div class="name"><label for="name">폴더명</label><input id="name" type="text"></div>
+    <label>최소 크기
+      <select id="min">
+        <option value="0">전체</option>
+        <option value="200">200px 이상</option>
+        <option value="400" selected>400px 이상</option>
+        <option value="800">800px 이상</option>
+      </select>
+    </label>
+    <button id="all" type="button">전체 선택</button>
+    <button id="none" type="button">선택 해제</button>
+  </div>
+
+  <div class="grid" id="grid"></div>
+</div>
+
+<div class="bar" id="bar">
+  <div class="in">
+    <span id="count">0장 선택</span>
+    <button class="primary" id="dl" type="button">ZIP으로 다운로드</button>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = { referer: null, items: [] };
+
+function setStatus(msg, err = false) {
+  $("status").textContent = msg;
+  $("status").className = "status" + (err ? " err" : "");
+}
+
+function visible() {
+  return state.items.filter((it) => !it.el.classList.contains("hidden") && !it.el.classList.contains("broken"));
+}
+
+function refresh() {
+  const min = +$("min").value;
+  for (const it of state.items) {
+    const small = !it.thumb && it.w && Math.max(it.w, it.h) < min;
+    it.el.classList.toggle("hidden", !!small);
+    if (small) { it.selected = false; it.el.classList.remove("sel"); }
+  }
+  const sel = visible().filter((it) => it.selected).length;
+  $("count").textContent = `${sel}장 선택 · 표시 ${visible().length}장`;
+  $("dl").disabled = sel === 0;
+}
+
+function toggle(it, on) {
+  it.selected = on ?? !it.selected;
+  it.el.classList.toggle("sel", it.selected);
+}
+
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = $("url").value.trim();
+  if (!url) return;
+  $("go").disabled = true;
+  $("grid").innerHTML = "";
+  $("toolbar").classList.remove("on");
+  $("bar").classList.remove("on");
+  setStatus("페이지를 읽는 중…");
+  try {
+    const res = await fetch("/api/scan", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ url }) });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    if (!data.images.length) {
+      setStatus("이미지를 찾지 못했어요. 페이지가 로그인/앱 전용이거나 사진을 스크립트로만 불러오는 사이트일 수 있어요.", true);
+      return;
+    }
+    state.referer = data.final_url;
+    $("name").value = (data.title || "location").replace(/\s*[:|\-–]\s*네이버.*$/, "").trim().slice(0, 60);
+    state.items = data.images.map((img) => {
+      const el = document.createElement("div");
+      el.className = "card sel";
+      const proxied = `/api/img?u=${encodeURIComponent(img.thumb || img.url)}&r=${encodeURIComponent(data.final_url)}`;
+      el.innerHTML = `<img loading="lazy" alt=""><div class="chk">✓</div>
+        <div class="meta"><span class="dim">…</span><a href="${img.url}" target="_blank" rel="noopener" title="원본 열기">원본 ↗</a></div>`;
+      const it = { ...img, el, selected: true, w: 0, h: 0 };
+      const im = el.querySelector("img");
+      im.alt = img.alt || "";
+      im.onload = () => {
+        it.w = im.naturalWidth; it.h = im.naturalHeight;
+        el.querySelector(".dim").textContent = img.thumb ? (img.alt || "원본 화질") : `${it.w}×${it.h}`;
+        refresh();
+      };
+      im.onerror = () => { el.classList.add("broken"); it.selected = false; refresh(); };
+      im.src = proxied;
+      el.addEventListener("click", (ev) => { if (ev.target.tagName === "A") return; toggle(it); refresh(); });
+      $("grid").appendChild(el);
+      return it;
+    });
+    $("toolbar").classList.add("on");
+    $("bar").classList.add("on");
+    setStatus(`${data.images.length}개의 이미지 후보를 찾았어요. 작은 아이콘·배너는 최소 크기로 걸러져요.`);
+    refresh();
+  } catch (err) {
+    setStatus(err.message || "오류가 발생했어요.", true);
+  } finally {
+    $("go").disabled = false;
+  }
+});
+
+$("min").addEventListener("change", () => {
+  for (const it of state.items) if (!it.el.classList.contains("broken")) toggle(it, true);
+  refresh();
+});
+$("all").addEventListener("click", () => { visible().forEach((it) => toggle(it, true)); refresh(); });
+$("none").addEventListener("click", () => { state.items.forEach((it) => toggle(it, false)); refresh(); });
+
+$("dl").addEventListener("click", async () => {
+  const urls = visible().filter((it) => it.selected).map((it) => it.url);
+  if (!urls.length) return;
+  const name = $("name").value.trim() || "location";
+  $("dl").disabled = true;
+  $("dl").textContent = `${urls.length}장 받는 중…`;
+  try {
+    const res = await fetch("/api/zip", { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify({ urls, name, referer: state.referer }) });
+    if (!res.ok) throw new Error("다운로드 실패");
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    const got = res.headers.get("X-Downloaded");
+    setStatus(`${got}/${urls.length}장을 "${name}.zip"으로 저장했어요.`);
+  } catch (err) {
+    setStatus(err.message, true);
+  } finally {
+    $("dl").textContent = "ZIP으로 다운로드";
+    refresh();
+  }
+});
+</script>
+</body>
+</html>
